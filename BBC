@@ -1,0 +1,168 @@
+//@version=5
+// © JBroadway
+// Check for updates 👇🏾
+// https://www.tradingview.com/script/dKez8gHV-Bollinger-Band-Candles/
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Recolors candle body/wick based off user set bollinger band criteria.
+// I also attempt to filter out low volume candles during regimes of low volatility.
+// Candles which are classified as 'low volume' are not added to the Bollinger Band array calculation
+//
+// Make sure to set visual order to "bring to front" or else candles will be behind your default candle colors.
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+indicator("Bollinger Band Candles", shorttitle="BBC", overlay=true, max_labels_count=500)
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// DEFAULT COLLORS 💅🏽
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+color bb_touch_color = color.blue
+color bb_touch_color2 = #ffa011
+color green = #26a69a
+color red = #ef5350
+
+candle_sticks = input.string("Dynamic", "Candle Stick Pattern", options=["Dynamic", "Standard"])
+
+dead_filter = input.bool(true, title="Filter Dead Candles?")
+show_dead_color = input.bool(false, title="Show dead candle color?")
+color body_color = input.color(color.white, title="Body Color", group="Colors")
+color border_color = input.color(color.white, title="Border Color", group="Colors")
+color wick_color = input.color(color.white, title="Wick Color", group="Colors")
+color dead = show_dead_color ? input.color(color.rgb(179, 14, 14, 46), title="Dead Candle Color", group="Colors") : body_color
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// DEAD CANDLES 💀
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//Dead Candles Sizing
+sizeOption = input.string(title="Size", options=["Auto", "Tiny", "Small", "Normal", "Large", "Huge", "None"], defval="Auto", group="Dead Candles")
+labelSize = switch sizeOption
+    "Auto" => size.auto
+    "Huge" => size.huge
+    "Large" => size.large
+    "Normal" => size.normal
+    "Small" => size.small
+    "Tiny" => size.tiny
+    "None" => size.auto
+    =>
+        na
+
+//Dead Candles
+candle_length = math.round_to_mintick(high-low)
+var dead_candle_arr = array.new_float()
+float min = -1
+
+// Dead candle array
+// Only adds unique values to the array.
+if array.size(dead_candle_arr) == 0
+    array.push(dead_candle_arr, candle_length)
+else
+    if array.binary_search(dead_candle_arr, candle_length) == -1
+        array.push(dead_candle_arr, candle_length)
+
+// Due to float numbers there's probably super similar lengths that get added to the array like 0.0001 and 0.00011
+// To compensate for this I'm just taking the 5th smallest candle_height value to use as a baseline for what a 'dead candle' is.
+if array.size(dead_candle_arr) >= 5
+    min := array.min(dead_candle_arr, 4)
+
+dead_candle = candle_length <= min ? 1 : 0
+
+//Dead Candle Labeling
+if dead_candle == 1 and candle_length < 1
+    body_color := dead
+    border_color := dead
+    if sizeOption != "None"
+        label.new(bar_index, hlc3, style=label.style_circle, size=labelSize, color=dead)
+
+//Add non-dead candles into an array
+var actual_candles_with_volume = array.new_float()
+if dead_candle == 1
+    array.push(actual_candles_with_volume, na)
+else
+    array.push(actual_candles_with_volume, close)
+
+high_vol_canlde = array.get(actual_candles_with_volume, array.size(actual_candles_with_volume) - 1)
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// BOLLINGER BANDS 🎳
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//Bolinger Band Criteria #1 Inputs
+color bb_touch  = input.color(bb_touch_color, title="Color", group="Candle Criteria #1", tooltip="Color criteria applied to candle wicks and body when candle closes below/above band.")
+length          = input.int(10, "Length", group="Candle Criteria #1")
+float stdv      = input.float(2, "Standard Deviation", group="Candle Criteria #1")
+show_criteria_1 = input.bool(false, title="Show Bollinger Bands", group="Candle Criteria #1")
+
+//Bolinger Band Criteria #2 Inputs
+color bb_touch2  = input.color(bb_touch_color2, title="Color", group="Candle Criteria #2", tooltip="Color criteria applied to candle wicks and body when candle closes below/above band.")
+length2          = input.int(10, "Length", group="Candle Criteria #2")
+float stdv2      = input.float(2.5, "Standard Deviation", group="Candle Criteria #2")
+show_criteria_2  = input.bool(false, title="Show Bollinger Bands", group="Candle Criteria #2")
+
+//Bollinger Bands
+[middle, upper, lower] = ta.bb(dead_filter ? high_vol_canlde : close, length, stdv)
+[middle2, upper2, lower2] = ta.bb(dead_filter ? high_vol_canlde : close, length2, stdv2)
+
+//Show Bollinger Bands
+plot(upper, color=show_criteria_1 ? bb_touch_color : na)
+plot(upper2, color=show_criteria_2 ? bb_touch_color2 : na)
+
+plot(lower, color=show_criteria_1 ? bb_touch_color : na)
+plot(lower2, color=show_criteria_2 ? bb_touch_color2 : na)
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// CANDLE SPECIFICATIONS 🕯
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+bool green_candle = close >= open
+bool red_candle = open > close
+
+top_wick = green_candle == true ? high - close : high - open
+bottom_wick = green_candle == true ? open - low : close - low
+body = green_candle == true ? close - open : open - close
+last_candle = close[1] - open[1]
+
+trad_colors = green_candle == true ? green : red
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// COLOR CONDITIONS 🎨
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+if green_candle == true and (high > upper or low < lower) //If the current candle is GREEN (close > open) and either one of the wicks is above the upper band or the lower band then commence the following rules:
+    // Green Candle Wicks
+    wick_color := bb_touch_color
+    if high > upper2 or low < lower2
+        wick_color := bb_touch_color2
+    // Green Candle Body & Border Color (BB Criteria #1)
+    if close > upper or open < lower
+        body_color := bb_touch_color
+        border_color := bb_touch_color
+    // BB Criteria #2
+    if close > upper2 or open < lower2
+        body_color := bb_touch_color2
+        border_color := bb_touch_color2
+
+
+if red_candle == true and (low < lower or high > upper) //If the current candle is RED (close < open) and either one of the wicks is above the upper band or the lower band then commence the following rules:
+    // Red Candle Wicks
+    wick_color := bb_touch_color
+    if high > upper2 or low < lower2
+        wick_color := bb_touch_color2
+    // Red Candle Body Color (BB Criteria #1)
+    if close < lower or open > upper
+        body_color := bb_touch_color
+        border_color := bb_touch_color
+    // BB Criteria #2
+    if close < lower2 or open > upper2
+        body_color := bb_touch_color2
+        border_color := bb_touch_color2
+
+if dead_candle == 1 and dead_filter == true
+    body_color := dead
+    border_color := dead
+
+//Plotting
+plotcandle(open, high, low, close, "Traditional Candles", color=body_color, wickcolor=wick_color, bordercolor=border_color)
+plot(candle_length, display = display.data_window, title="Candle Length")
+plot(dead_candle, display=display.data_window)
